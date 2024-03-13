@@ -1,0 +1,286 @@
+Program.Sub.ScreenSU.Start
+Gui.F_chooseDept..Create
+Gui.F_chooseDept..Size(3750,1620)
+Gui.F_chooseDept..MinX(0)
+Gui.F_chooseDept..MinY(0)
+Gui.F_chooseDept..Position(0,0)
+Gui.F_chooseDept..BackColor(-2147483633)
+Gui.F_chooseDept..MousePointer(0)
+Gui.F_chooseDept..Sizeable(False)
+Gui.F_chooseDept..Event(UnLoad,F_chooseDept_UnLoad)
+Gui.F_chooseDept.cboDeptID.Create(ComboBox)
+Gui.F_chooseDept.cboDeptID.Size(1095,330)
+Gui.F_chooseDept.cboDeptID.Position(120,105)
+Gui.F_chooseDept.cboDeptID.Event(Change,cboDeptID_Change)
+Gui.F_chooseDept.lblDptNames.Create(Label,"Select a Department",True,2040,255,0,1395,195,True,0,"Arial",8,-2147483633,0)
+Gui.F_chooseDept.cmdCancel.Create(Button)
+Gui.F_chooseDept.cmdCancel.Size(1500,375)
+Gui.F_chooseDept.cmdCancel.Position(120,570)
+Gui.F_chooseDept.cmdCancel.Caption("Cancel")
+Gui.F_chooseDept.cmdCancel.Event(Click,cmdCancel_Click)
+Gui.F_chooseDept.cmdSave.Create(Button)
+Gui.F_chooseDept.cmdSave.Size(1500,375)
+Gui.F_chooseDept.cmdSave.Position(1920,570)
+Gui.F_chooseDept.cmdSave.DefaultValue("")
+Gui.F_chooseDept.cmdSave.Caption("Save")
+Gui.F_chooseDept.cmdSave.Event(Click,cmdSave_Click)
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+'GCG_5273_Cost_Center_for_Purchasing
+'Alejandro Anazco V.
+'aanazco@gssmail.com
+'Version 1
+
+'True if caller hook is 16242 requisition line, false if it caller hook is 17060 PO line
+v.Global.bHookPO.Declare
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'v.Passed.000018 = GL Account for Po Hook 17060
+'v.Passed.000036 = GL Account for Req Hook 16242
+'Hook 17060  PO Line Pre Save
+'Hook 16242 Req Pre Save
+'Hook 16190 Req Populate
+'Hook 16952 Populate Automatic Purch. (Blanket)
+'Hook 16950 Selected PurCh List
+f.Intrinsic.Control.CallSub(LoadDepartments)
+f.Intrinsic.Control.SelectCase(v.Caller.Hook)
+	f.Intrinsic.Control.Case(17060)
+		f.Intrinsic.Control.If(v.Passed.000018, >=, 4000000)
+			'checks if the line was from a requisition
+			f.Intrinsic.Control.CallSub(isFromReq)
+			'validate the dept field, if it fails to validate it launches the screen to choose a dept.
+			f.Intrinsic.Control.CallSub(ValidateDept_Lines)
+			'setting the control bool to false for PO lines
+			v.Global.bHookPO.Set(false)
+		f.Intrinsic.Control.EndIf
+	f.Intrinsic.Control.Case(16242)
+		f.Intrinsic.Control.If(v.Passed.000036, >=, 4000000)
+			'validate the dept field, if it fails to validate it launches the screen to choose a dept.
+			f.Intrinsic.Control.CallSub(ValidateDept_ReqLines)
+			'setting the control bool to true for Requisition Lines
+			v.Global.bHookPO.Set(true)
+		f.Intrinsic.Control.EndIf
+	f.Intrinsic.Control.Case(16190)
+		Variable.passed.000106.set("Department")
+	f.Intrinsic.Control.Case(16952)
+		f.Intrinsic.Control.CallSub(writeAllReqTxt)
+	f.Intrinsic.Control.Case(16950)
+		f.Intrinsic.Control.CallSub(readAllReqTxt)
+f.Intrinsic.Control.EndSelect
+Program.Sub.Main.End
+
+Program.Sub.LoadDepartments.Start
+v.Local.sSQL.Declare
+f.Intrinsic.Control.Try
+	v.Local.sSQL.Set("select dept_id, dept_name from departments order by dept_id asc")
+	'creates datatable with the departments information
+	f.ODBC.Connection!con.OpenCompanyConnection
+		f.Data.DataTable.CreateFromSQL("deptDT", "con", v.Local.sSQL, true)
+	f.ODBC.Connection!con.Close
+f.Intrinsic.Control.Catch
+	f.ODBC.Connection!con.Close
+	f.Intrinsic.Control.CallSub(ErrorMsg)
+f.Intrinsic.Control.EndTry
+Program.Sub.LoadDepartments.End
+
+Program.Sub.ErrorMsg.Start
+v.Local.sError.Declare
+'Generic Error message.
+f.Intrinsic.String.Build("Project GCG_5273_Cost_Center_for_Purchasing.g2u {0}{0}Subroutine: {1}{0}Error: {2} with Description: {3}", v.Ambient.NewLine, v.Ambient.CurrentSubroutine, v.Ambient.ErrorNumber, v.Ambient.ErrorDescription, v.Local.sError)
+f.Intrinsic.UI.Msgbox(v.Local.sError)
+Program.Sub.ErrorMsg.End
+
+Program.Sub.ValidateDept_Lines.Start
+v.Local.bValidDept.Declare
+v.Local.bValidDept.Set(false)
+v.Local.iCount.Declare
+'v.Passed.000015 = Department
+
+'checks the Dept Field in the lines screen against the dataTable
+f.Intrinsic.Control.For(v.Local.iCount, 0, v.DataTable.deptDT.RowCount--, 1)
+	f.Intrinsic.Control.If(v.DataTable.deptDT(v.Local.iCount).dept_id!FieldValTrim, =, v.Passed.000015)
+		'if the department is valid, it sets the control boolean to true.
+		v.Local.bValidDept.Set(true)
+	f.Intrinsic.Control.EndIf
+f.Intrinsic.Control.Next(v.Local.iCount)
+
+'if false, launches the screen selection
+f.Intrinsic.Control.If(v.Local.bValidDept, =, false)
+	'populates the fields in the screen
+	f.Intrinsic.Control.CallSub(PopulateScreen)
+	gui.F_chooseDept..Show
+f.Intrinsic.Control.EndIf
+
+Program.Sub.ValidateDept_Lines.End
+
+Program.Sub.PopulateScreen.Start
+v.Local.iCount.Declare
+v.Local.sIcon.Declare
+
+'sets the icon
+f.Intrinsic.String.Build("{0}\ART\gss2.ico", v.Caller.GlobalDir, v.Local.sIcon)
+gui.F_chooseDept..Icon(v.Local.sIcon)
+'sets form caption
+gui.F_chooseDept..Caption("Choose a Department")
+
+'fills the combo box with the departments
+f.Intrinsic.Control.For(v.Local.iCount, 0, v.DataTable.deptDT.RowCount--, 1)
+	gui.F_chooseDept.cboDeptID.AddItem(v.DataTable.deptDT(v.Local.iCount).dept_id!FieldValTrim)
+f.Intrinsic.Control.Next(v.Local.iCount)
+Program.Sub.PopulateScreen.End
+
+Program.Sub.cboDeptID_Change.Start
+'Checks the deptId selected in the combobox and sets the label to the corresponding deptName
+v.Local.iCount.Declare
+f.Intrinsic.Control.For(v.Local.iCount, 0, v.DataTable.deptDT.RowCount--, 1)
+	f.Intrinsic.Control.If(v.Screen.F_chooseDept!cboDeptID.Value, =, v.DataTable.deptDT(v.Local.iCount).dept_id!FieldValTrim)
+		gui.F_chooseDept.lblDptNames.Caption(v.DataTable.deptDT(v.Local.iCount).dept_name!FieldValTrim)
+	f.Intrinsic.Control.EndIf
+f.Intrinsic.Control.Next(v.Local.iCount)
+
+Program.Sub.cboDeptID_Change.End
+
+Program.Sub.cmdSave_Click.Start
+'v.Passed.000015 = Department for Po Lines
+'v.Passed.000032 = Department for Req Lines
+'Sets the passes variable for dept to the value selected in the combobox.
+v.Local.iCount.Declare
+f.Intrinsic.Control.For(v.Local.iCount, 0, v.DataTable.deptDT.RowCount--, 1)
+	f.Intrinsic.Control.If(v.Screen.F_chooseDept!cboDeptID.Value, =, v.DataTable.deptDT(v.Local.iCount).dept_id!FieldValTrim)
+		f.Intrinsic.Control.If(v.Global.bHookPO)
+			v.Passed.000032.Set(v.Screen.F_chooseDept!cboDeptID.Value)
+			f.Intrinsic.Control.End
+		f.Intrinsic.Control.Else
+			v.Passed.000015.Set(v.Screen.F_chooseDept!cboDeptID.Value)
+			f.Intrinsic.Control.End
+		f.Intrinsic.Control.EndIf		
+	f.Intrinsic.Control.EndIf
+f.Intrinsic.Control.Next(v.Local.iCount)
+f.Intrinsic.UI.Msgbox("Please select a valid department")
+Program.Sub.cmdSave_Click.End
+
+Program.Sub.cmdCancel_Click.Start
+'v.Passed.777777 = Override Flag
+'Need to stop the save line hook
+v.Passed.777777.Set(1)
+f.Intrinsic.Control.End
+Program.Sub.cmdCancel_Click.End
+
+Program.Sub.F_chooseDept_UnLoad.Start
+'v.Passed.777777 = Override Flag
+'Need to stop the save line hook
+v.Passed.777777.Set(1)
+f.Intrinsic.Control.End
+Program.Sub.F_chooseDept_UnLoad.End
+
+Program.Sub.isFromReq.Start
+v.Local.sReqDept.Declare
+v.Local.sPOReqLine.Declare
+v.Local.sSQL.Declare
+'v.Passed.000015 = Department
+'v.Passed.000016 = Po Requisition Number
+'v.Passed.000051 = Po Requisition Line
+f.Intrinsic.Control.Try
+	'checks if the parts comes from a req
+	f.Intrinsic.Control.If(v.Passed.000016, =, "")
+		'f.Intrinsic.UI.Msgbox("No Req")
+	f.Intrinsic.Control.Else	
+	'if it is comming from a req, 
+		'fill the req line field with left 0 up to 3 characters.
+		v.Local.sPOReqLine.Set(v.Passed.000051)
+		f.Intrinsic.String.LPad(v.Local.sPOReqLine, "0", 3, v.Local.sPOReqLine)
+		f.Intrinsic.String.Build("select user_ref from v_purchase_reqs where po_req_number = '{0}' and po_req_line = '{1}' ",v.Passed.000016, v.Local.sPOReqLine,  v.Local.sSQL)
+		'gets the user_ref from the requisition using the req number and req line.
+		f.ODBC.Connection!con.OpenCompanyConnection
+			f.Data.DataTable.CreateFromSQL("reqDT", "con", v.Local.sSQL, true)
+		f.ODBC.Connection!con.Close	
+		'gets the first 4 digits from the user ref field
+		v.Local.sReqDept.Set(v.DataTable.reqDT(0).user_ref!FieldValTrim)
+		f.Intrinsic.String.Left(v.Local.sReqDept, 4, v.Local.sReqDept)
+		'sets the dept field with the first 4 characteres from user ref.
+		v.Passed.000015.Set(v.Local.sReqDept)	
+	f.Intrinsic.Control.EndIf
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub(ErrorMsg)
+f.Intrinsic.Control.EndTry
+Program.Sub.isFromReq.End
+
+Program.Sub.ValidateDept_ReqLines.Start
+v.Local.bValidDept.Declare
+v.Local.bValidDept.Set(false)
+v.Local.iCount.Declare
+'v.Passed.000032 = User Ref to be used as Department
+'checks the Dept Field in the lines screen against the dataTable
+f.Intrinsic.Control.For(v.Local.iCount, 0, v.DataTable.deptDT.RowCount--, 1)
+	f.Intrinsic.Control.If(v.DataTable.deptDT(v.Local.iCount).dept_id!FieldValTrim, =, v.Passed.000032)
+		'if the department is valid, it sets the control boolean to true.
+		v.Local.bValidDept.Set(true)
+	f.Intrinsic.Control.EndIf
+f.Intrinsic.Control.Next(v.Local.iCount)
+
+'if false, launches the screen selection
+f.Intrinsic.Control.If(v.Local.bValidDept, =, false)
+	'populates the fields in the screen
+	f.Intrinsic.Control.CallSub(PopulateScreen)
+	gui.F_chooseDept..Show
+f.Intrinsic.Control.EndIf
+
+Program.Sub.ValidateDept_ReqLines.End
+
+Program.Sub.writeAllReqTxt.Start
+v.Local.sDataString.Declare
+v.Local.iCnt.Declare
+v.Local.sFileDest.Declare
+v.Local.bExists.Declare
+
+f.Intrinsic.String.Build("{0}\FILES\{1}GCG_5273_Reqs.txt", v.Caller.GlobalDir, v.Caller.Terminal, v.Local.sFileDest)
+f.ODBC.Connection!con.OpenCompanyConnection
+	f.Data.DataTable.CreateFromSQL("requisitionDT", "con", "Select PO_REQ_NUMBER, PART, Vendor, User_Ref, PO_REQ_LINE from v_purchase_reqs")
+f.ODBC.Connection!con.Close
+f.Intrinsic.Control.For(v.Local.iCnt, 0, v.DataTable.requisitionDT.RowCount--, 1)
+	f.Intrinsic.String.Build("{0}{1}*!*{2}*!*{3}*!*{4}*!*{5}*$*",  v.Local.sDataString, v.DataTable.requisitionDT(v.Local.iCnt).PO_REQ_NUMBER!FieldVal, v.DataTable.requisitionDT(v.Local.iCnt).PART!FieldVal, v.DataTable.requisitionDT(v.Local.iCnt).Vendor!FieldVal, v.DataTable.requisitionDT(v.Local.iCnt).User_Ref!FieldVal, v.DataTable.requisitionDT(v.Local.iCnt).PO_REQ_LINE!FieldVal, v.Local.sDataString)
+f.Intrinsic.Control.Next(v.Local.iCnt)
+
+f.Intrinsic.File.Exists(v.Local.sFileDest, v.Local.bExists)
+
+f.Intrinsic.Control.If(v.Local.bExists)
+	f.Intrinsic.File.DeleteFile(v.Local.sFileDest)
+	f.Intrinsic.File.String2File(v.Local.sFileDest, v.Local.sDataString)
+f.Intrinsic.Control.Else
+	f.Intrinsic.File.String2File(v.Local.sFileDest, v.Local.sDataString)
+f.Intrinsic.Control.EndIf
+f.Data.DataTable.Close("requisitionDT")
+Program.Sub.writeAllReqTxt.End
+
+Program.Sub.readAllReqTxt.Start
+v.Local.sDataString.Declare
+v.Local.iCnt.Declare
+v.Local.sFileDest.Declare
+v.Local.bExists.Declare
+v.Local.sSQL.Declare
+v.Local.iReqLine.Declare
+
+f.Intrinsic.String.Build("{0}\FILES\{1}GCG_5273_Reqs.txt", v.Caller.GlobalDir, v.Caller.Terminal, v.Local.sFileDest)
+f.Intrinsic.File.File2String(v.Local.sFileDest, v.Local.sDataString)
+f.Data.DataTable.CreateFromString("requisitionDT", v.Local.sDataString, "PO_REQ_NUMBER*!*PART*!*Vendor*!*User_Ref*!*requisition_line", "string*!*string*!*string*!*string*!*long", "*!*", "*$*")
+
+f.Intrinsic.Control.For(v.Local.iCnt, 0, v.DataTable.requisitionDT.RowCount--, 1)
+	v.Local.iReqLine.Set(v.DataTable.requisitionDT(v.Local.iCnt).requisition_line!FieldVal)
+	f.Intrinsic.String.Build("select * from v_PO_LINES where requisition_no = '{0}' and part = '{1}' and requisition_line = '{2}'", v.DataTable.requisitionDT(v.Local.iCnt).PO_REQ_NUMBER!FieldVal, v.DataTable.requisitionDT(v.Local.iCnt).PART!FieldVal, v.Local.iReqLine, v.Local.sSQL)
+
+	f.ODBC.Connection!con.OpenCompanyConnection	
+		f.Data.DataTable.CreateFromSQL("siglePoLine", "con", v.Local.sSQL)
+	f.ODBC.Connection!con.Close
+	
+	f.Intrinsic.Control.If(v.DataTable.siglePoLine.RowCount, =, 1)
+		f.Intrinsic.String.Build("update v_PO_LINES set department = '{0}' where requisition_no = '{1}' and part = '{2}' and requisition_line = '{3}'", v.DataTable.requisitionDT(v.Local.iCnt).User_Ref!FieldVal, v.DataTable.requisitionDT(v.Local.iCnt).PO_REQ_NUMBER!FieldVal, v.DataTable.requisitionDT(v.Local.iCnt).PART!FieldVal, v.Local.iReqLine, v.Local.sSQL)
+		f.ODBC.Connection!con.OpenCompanyConnection	
+			f.ODBC.Connection!con.Execute(v.Local.sSQL)
+		f.ODBC.Connection!con.Close
+	f.Intrinsic.Control.EndIf
+	
+	f.Data.DataTable.Close("siglePoLine")
+f.Intrinsic.Control.Next(v.Local.iCnt)
+Program.Sub.readAllReqTxt.End
